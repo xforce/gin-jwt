@@ -225,7 +225,7 @@ func (mw *GinJWTMiddleware) MiddlewareInit() error {
 
 	if mw.Authorizator == nil {
 		mw.Authorizator = func(userID string, c *gin.Context) bool {
-			return true
+			return len(userID) > 0
 		}
 	}
 
@@ -281,19 +281,36 @@ func (mw *GinJWTMiddleware) MiddlewareFunc() gin.HandlerFunc {
 
 func (mw *GinJWTMiddleware) middlewareImpl(c *gin.Context) {
 	token, err := mw.parseToken(c)
+	var id string
 
-	if err != nil {
-		mw.unauthorized(c, http.StatusUnauthorized, mw.HTTPStatusMessageFunc(err, c))
-		return
+	if err == nil && len(id) > 0 {
+		// If we successfully got the token
+		// just continue with getting all the information
+		// and setting it on the context
+		claims := token.Claims.(jwt.MapClaims)
+
+		id = mw.IdentityHandler(claims)
+		c.Set("JWT_PAYLOAD", claims)
+		c.Set("userID", id)
+	} else {
+		// If we were unable to get a token
+		// We should call the Authorizator
+		// so we can block/allow access to certain functions without
+		// a token
+		// For this we can just set the id to empty string
+		// so the user knows that this was a request with an empty
+		// token
+		id = ""
 	}
-
-	claims := token.Claims.(jwt.MapClaims)
-
-	id := mw.IdentityHandler(claims)
-	c.Set("JWT_PAYLOAD", claims)
-	c.Set("userID", id)
-
+	// By default we don't allow empty token
+	// this has to be implemented by the user and not be default behavior
+	//
 	if !mw.Authorizator(id, c) {
+		// TODO(alexander): Do we actually need this?
+		if len(id) == 0 {
+			mw.unauthorized(c, http.StatusUnauthorized, mw.HTTPStatusMessageFunc(err, c))
+			return
+		}
 		mw.unauthorized(c, http.StatusForbidden, mw.HTTPStatusMessageFunc(ErrForbidden, c))
 		return
 	}
